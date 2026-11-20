@@ -6,7 +6,7 @@ As required by AGPLv3 section 7(c), the changes made in this fork are listed bel
 
 | File | Change | Since |
 |---|---|---|
-| `web/src/styles/brand.css` | New file: untoken colors for the default theme preset (light and dark) | `v1.0.0-rc.51-brand.1`, colors changed in `v1.0.0-rc.51-brand.2` |
+| `web/src/styles/brand.css` | New file: untoken colors for the default theme preset (light and dark), and the layout and type of the public pages' header (styles only) | `v1.0.0-rc.51-brand.1`; colors changed and header styles added in `v1.0.0-rc.51-brand.2` |
 | `web/src/styles/index.css` | One line that imports `brand.css` after the theme presets | `v1.0.0-rc.51-brand.1` |
 | `web/public/brand/untoken-mark.svg` | New file: the untoken logo, which the site settings can point to | `v1.0.0-rc.51-brand.2` |
 | `MODIFICATIONS.md` | This file | `v1.0.0-rc.51-brand.1` |

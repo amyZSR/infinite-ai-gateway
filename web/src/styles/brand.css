@@ -37,3 +37,54 @@
   --sidebar-accent-foreground: oklch(0.93 0.12 122);
   --sidebar-ring: oklch(0.899 0.203 122.9);
 }
+
+/*
+ * Header of the public pages (home, Model Square, About, sign-in), laid out like
+ * the untoken site header: the site name in a monospace face, the links in the
+ * middle, and language, theme, notifications and sign-in on the right. Only
+ * styles change; the header's markup and behavior stay upstream's. The rules
+ * select the header by its own classes, so if a release changes that markup they
+ * stop matching and the header keeps its default look.
+ */
+header.fixed.inset-x-0.top-0 nav a > span[title] {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+header.fixed.inset-x-0.top-0 nav a[href='/sign-in'] {
+  height: 2.25rem;
+  padding: 0 1rem;
+  border-radius: 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+@media (min-width: 64rem) {
+  header.fixed.inset-x-0.top-0 nav > div:first-child {
+    flex: 0 0 auto;
+  }
+
+  header.fixed.inset-x-0.top-0 nav > div.hidden {
+    flex: 1 1 auto;
+  }
+
+  /* Equal free space before the first link and after the last one. */
+  header.fixed.inset-x-0.top-0 nav > div.hidden > a:first-child,
+  header.fixed.inset-x-0.top-0 nav > div.hidden > a + div {
+    margin-left: auto;
+  }
+
+  header.fixed.inset-x-0.top-0 nav > div.hidden > a:not([href='/sign-in']) {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9375rem;
+  }
+
+  header.fixed.inset-x-0.top-0
+    nav
+    > div.hidden
+    > a:not([href='/sign-in']):hover {
+    background: var(--muted);
+  }
+}
