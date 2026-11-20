@@ -9,6 +9,7 @@ As required by AGPLv3 section 7(c), the changes made in this fork are listed bel
 | `web/src/styles/brand.css` | New file: brand colors for the default theme preset (light and dark) | `v1.0.0-rc.51-brand.1` |
 | `web/src/styles/index.css` | One line that imports `brand.css` after the theme presets | `v1.0.0-rc.51-brand.1` |
 | `MODIFICATIONS.md` | This file | `v1.0.0-rc.51-brand.1` |
+| `.github/workflows/brand-sync.yml` | New file: moves the brand commits onto each upstream release, then builds, tests and publishes the image. The workflows inherited from upstream are kept unchanged but disabled in this repository | `v1.0.0-rc.51-brand.1` |
 
 The attribution required by NOTICE is kept unchanged: "Frontend design and development by New API contributors." and the link to the original project.
 

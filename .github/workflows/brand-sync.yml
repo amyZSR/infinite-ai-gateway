@@ -1,0 +1,450 @@
+# Brand sync for this fork of new-api (see MODIFICATIONS.md).
+#
+# Keeps the `brand` branch as "an upstream release of QuantumNous/new-api plus
+# our `brand:` commits". When upstream publishes a release, the brand commits
+# are moved onto it, the image is built with the upstream Dockerfile, smoke
+# tested, and published as ghcr.io/<owner>/<repo>:<upstream tag>-brand.<n>
+# together with a git tag of the same name. New brand commits on the current
+# release are published the same way under the next <n>. Each result is
+# reported as an issue in this repository; nothing is deployed automatically.
+#
+# Repository settings this workflow needs:
+#   - Issues enabled.
+#   - A token that may push workflow files (Contents and Workflows write on
+#     this repository): a GitHub App, given as the variable SYNC_APP_CLIENT_ID
+#     and the secret SYNC_APP_PRIVATE_KEY, or a fine-grained personal access
+#     token in the secret SYNC_TOKEN. GITHUB_TOKEN cannot push commits that
+#     change .github/workflows/, and upstream releases often do.
+#   - Optional: the variable BRAND_SYNC_PAUSED=true stops the hourly runs;
+#     manual runs still work.
+#
+# The other workflows in .github/workflows/ come from upstream. They are
+# disabled on every run, so the tags pushed here never start upstream's
+# release or Docker Hub jobs.
+
+name: Brand sync
+
+on:
+  schedule:
+    - cron: '41 * * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: Upstream tag to build on (empty for the latest upstream release)
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: brand-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  UPSTREAM_REPO: QuantumNous/new-api
+  BRAND_BRANCH: brand
+  # Workflows that stay enabled, one path per line.
+  ALLOWED_WORKFLOWS: .github/workflows/brand-sync.yml
+
+jobs:
+  sync:
+    if: github.event_name != 'schedule' || vars.BRAND_SYNC_PAUSED != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: write    # disable the inherited upstream workflows
+      contents: read    # branch and tag pushes use the sync token instead
+      issues: write     # deploy and failure notices
+      packages: write   # push the image to GHCR
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HAS_SYNC_APP: ${{ vars.SYNC_APP_CLIENT_ID != '' && secrets.SYNC_APP_PRIVATE_KEY != '' }}
+      HAS_SYNC_TOKEN: ${{ secrets.SYNC_TOKEN != '' }}
+    steps:
+      - name: Disable inherited workflows
+        run: |
+          # Saved as a script: it runs again after the branch push, because an
+          # upstream release can add workflow files.
+          cat > "$RUNNER_TEMP/disable-inherited.sh" <<'EOF'
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows" \
+            --jq '.workflows[] | select(.state == "active") | [.id, .path] | @tsv' |
+          while IFS=$'\t' read -r id path; do
+            case "$path" in .github/workflows/*) ;; *) continue ;; esac
+            if grep -qxF -- "$path" <<<"$ALLOWED_WORKFLOWS"; then continue; fi
+            echo "Disabling $path"
+            gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$id/disable"
+          done
+          EOF
+          bash "$RUNNER_TEMP/disable-inherited.sh"
+
+      - name: Look for a new upstream release
+        env:
+          INPUT_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          up_tag="$INPUT_TAG"
+          if [ -z "$up_tag" ]; then
+            up_tag=$(gh api "repos/$UPSTREAM_REPO/releases/latest" --jq .tag_name)
+          fi
+          if [[ ! "$up_tag" =~ ^v[0-9][0-9A-Za-z.-]*$ || "$up_tag" == *-brand.* ]]; then
+            echo "::error::Not an upstream release tag: $up_tag"
+            exit 1
+          fi
+          echo "UP_TAG=$up_tag" >> "$GITHUB_ENV"
+          echo "Upstream release: $up_tag"
+
+          # Nothing to do when the branch head already carries a brand tag for this release.
+          origin="https://github.com/$GITHUB_REPOSITORY.git"
+          head=$(git ls-remote "$origin" "refs/heads/$BRAND_BRANCH" | cut -f1)
+          if [ -z "$head" ]; then
+            echo "::error::Branch $BRAND_BRANCH not found"
+            exit 1
+          fi
+          if git ls-remote --tags "$origin" | awk -v head="$head" -v prefix="refs/tags/$up_tag-brand." \
+              '$1 == head && index($2, prefix) == 1 { found = 1 } END { exit !found }'; then
+            echo "Already published: $BRAND_BRANCH ($head) carries a brand tag for $up_tag"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # A failure on this release is reported already: hourly runs wait until that issue is closed.
+          open=$(gh issue list --state open --limit 100 --json number,title |
+            jq -r --arg t "Brand sync failed: $up_tag" 'map(select(.title | endswith($t))) | first | .number // empty')
+          if [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "::notice::Issue #$open reports a failure on $up_tag; run the workflow by hand after fixing it"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [ "$HAS_SYNC_APP" != true ] && [ "$HAS_SYNC_TOKEN" != true ]; then
+            echo "No push token: set the variable SYNC_APP_CLIENT_ID and the secret SYNC_APP_PRIVATE_KEY (GitHub App), or the secret SYNC_TOKEN." >> "$RUNNER_TEMP/failure.md"
+            echo "::error::No push token configured"
+            exit 1
+          fi
+
+      - name: Check out ${{ env.BRAND_BRANCH }}
+        if: env.SKIP != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.BRAND_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the upstream base of ${{ env.BRAND_BRANCH }}
+        if: env.SKIP != 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --quiet --force --no-tags "https://github.com/$UPSTREAM_REPO.git" 'refs/tags/v*:refs/tags/v*'
+          up_commit=$(git rev-parse -q --verify "refs/tags/$UP_TAG^{commit}") || {
+            echo "::error::Tag $UP_TAG not found in $UPSTREAM_REPO"
+            exit 1
+          }
+          base=$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-brand.*' HEAD)
+          base_commit=$(git rev-parse "$base^{commit}")
+          echo "BASE=$base" >> "$GITHUB_ENV"
+          echo "OLD_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "$BRAND_BRANCH is based on $base"
+
+          # Everything on top of the upstream tag must be our own `brand:` commits.
+          # A merge (the "Sync fork" button on GitHub makes one) or any other commit stops here.
+          others=$(git log --no-merges --format='%h %s' "$base..HEAD" | grep -v '^[0-9a-f]* brand: ' || true)
+          merges=$(git log --merges --format='%h %s' "$base..HEAD")
+          if [ -n "$others$merges" ]; then
+            {
+              echo "\`$BRAND_BRANCH\` has commits on top of \`$base\` that are not \`brand:\` commits:"
+              echo
+              printf '%s\n' "$others" "$merges" | sed '/^$/d; s/^/    /'
+              echo
+              echo "Remove them, for example by resetting \`$BRAND_BRANCH\` to its last \`-brand.\` tag, then run this workflow again."
+            } >> "$RUNNER_TEMP/failure.md"
+            echo "::error::$BRAND_BRANCH has commits that are not brand: commits"
+            exit 1
+          fi
+
+          if [ "$base_commit" = "$up_commit" ]; then
+            echo "REBASE=false" >> "$GITHUB_ENV"
+          elif git merge-base --is-ancestor "$base_commit" "$up_commit"; then
+            echo "REBASE=true" >> "$GITHUB_ENV"
+          elif git merge-base --is-ancestor "$up_commit" "$base_commit"; then
+            echo "::notice::$UP_TAG is older than $base, the base of $BRAND_BRANCH; nothing to do"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "\`$UP_TAG\` is not a later release of \`$base\`, the base of \`$BRAND_BRANCH\`: upstream released it from another line. Decide by hand which release to follow." >> "$RUNNER_TEMP/failure.md"
+            echo "::error::$UP_TAG and $base are on different release lines"
+            exit 1
+          fi
+
+      - name: Collect upstream release notes
+        if: env.SKIP != 'true'
+        run: |
+          releases="$RUNNER_TEMP/releases.json"
+          notes="$RUNNER_TEMP/release-notes.md"
+          gh api "repos/$UPSTREAM_REPO/releases?per_page=100" > "$releases"
+          base_commit=$(git rev-parse "$BASE^{commit}")
+          : > "$notes"
+          # Releases after the current base, up to and including the target release.
+          jq -r '.[] | select(.draft | not) | .tag_name' "$releases" |
+          while read -r t; do
+            c=$(git rev-parse -q --verify "refs/tags/$t^{commit}") || continue
+            [ "$c" != "$base_commit" ] || continue
+            git merge-base --is-ancestor "$base_commit" "$c" || continue
+            git merge-base --is-ancestor "$c" "$UP_TAG" || continue
+            jq -r --arg t "$t" '.[] | select(.tag_name == $t) | "## \(.tag_name)\n\n\(.body // "")\n"' "$releases" >> "$notes"
+          done
+          pattern='CVE-[0-9]{4}-[0-9]+|GHSA(-[0-9a-z]{4}){3}|vulnerab|漏洞|\*\*(安全|security)\*\*|security (fix|issue|patch|advisory)|安全(修复|问题|更新|公告)|\b(XSS|SSRF|CSRF|RCE)\b|越权|提权|注入'
+          if grep -Eiq "$pattern" "$notes"; then
+            echo "SECURITY=true" >> "$GITHUB_ENV"
+            echo "::warning::The upstream release notes mention a security fix"
+          fi
+
+      - name: Move the brand commits onto ${{ env.UP_TAG }}
+        if: env.SKIP != 'true' && env.REBASE == 'true'
+        run: |
+          before=$(git rev-list --count "$BASE..HEAD")
+          if ! git rebase --onto "$UP_TAG" "$BASE"; then
+            {
+              echo "Moving the \`brand:\` commits from \`$BASE\` to \`$UP_TAG\` stopped on a conflict in:"
+              echo
+              git diff --name-only --diff-filter=U | sed 's/^/- `/; s/$/`/'
+            } >> "$RUNNER_TEMP/failure.md"
+            git rebase --abort
+            echo "::error::Conflict while moving the brand commits"
+            exit 1
+          fi
+          after=$(git rev-list --count "$UP_TAG..HEAD")
+          if [ "$after" != "$before" ]; then
+            echo "::warning::$before brand commits before the move, $after after: upstream already contains part of them"
+          fi
+          git log --oneline "$UP_TAG..HEAD"
+
+      - name: Pick the image tag and check the brand layer
+        if: env.SKIP != 'true'
+        run: |
+          if [ -n "$(git tag --points-at HEAD --list "$UP_TAG-brand.*")" ]; then
+            echo "::notice::HEAD already carries a brand tag for $UP_TAG"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          last=$(git tag --list "$UP_TAG-brand.*" | sed -n 's/^.*-brand\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -n 1)
+          tag="$UP_TAG-brand.$(( ${last:-0} + 1 ))"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:$tag" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          # Read by the Dockerfile for the version string; not committed.
+          printf '%s\n' "$tag" > VERSION
+          echo "Building $tag"
+
+          # Every variable brand.css sets must still exist in the upstream theme;
+          # after an upstream rename the brand color would silently stop applying.
+          missing=""
+          vars=$(grep -oE -- '--[A-Za-z0-9-]+[[:space:]]*:' web/src/styles/brand.css | sed -E 's/[[:space:]]*:$//' | sort -u)
+          for v in $vars; do
+            [ "$v" != --brand-id ] || continue
+            grep -qE -- "(^|[^A-Za-z0-9-])$v[[:space:]]*:" web/src/styles/theme.css || missing="$missing $v"
+          done
+          grep -qF "@import './brand.css';" web/src/styles/index.css || missing="$missing @import './brand.css'"
+          if [ -n "$missing" ]; then
+            echo "The brand layer no longer matches upstream. Not found in web/src/styles/theme.css or index.css:$missing" >> "$RUNNER_TEMP/failure.md"
+            echo "::error::Brand styles out of date:$missing"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        if: env.SKIP != 'true'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build image
+        if: env.SKIP != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.COMMIT }}
+            org.opencontainers.image.version=${{ env.TAG }}
+            org.opencontainers.image.description=Modified build of new-api (https://github.com/QuantumNous/new-api). Changes are listed in MODIFICATIONS.md.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        if: env.SKIP != 'true'
+        run: |
+          # No database settings, so the image starts on SQLite.
+          docker run -d --name smoke -p 127.0.0.1:3000:3000 "$IMAGE"
+          status="$RUNNER_TEMP/status.json"
+          for _ in $(seq 1 60); do
+            curl -fsS -o "$status" http://127.0.0.1:3000/api/status 2>/dev/null && break
+            sleep 2
+          done
+          if ! grep -Eq '"success":[[:space:]]*true' "$status" 2>/dev/null ||
+             ! grep -Fq "\"version\":\"$TAG\"" "$status"; then
+            docker logs smoke 2>&1 | tail -n 50
+            echo "Smoke test: /api/status did not report success with version \`$TAG\`." >> "$RUNNER_TEMP/failure.md"
+            echo "::error::/api/status check failed"
+            exit 1
+          fi
+
+          # The built stylesheet must carry the marker from brand.css.
+          curl -fsS -o "$RUNNER_TEMP/index.html" http://127.0.0.1:3000/
+          hrefs=$(grep -oE 'href="[^"]+\.css"' "$RUNNER_TEMP/index.html" | sed -E 's/^href="//; s/"$//' || true)
+          found=""
+          for href in $hrefs; do
+            curl -fsS -o "$RUNNER_TEMP/style.css" "http://127.0.0.1:3000/${href#/}"
+            if grep -qF -- '--brand-id' "$RUNNER_TEMP/style.css"; then found=1; fi
+          done
+          if [ -z "$found" ]; then
+            echo "Smoke test: no stylesheet contains \`--brand-id\`, so brand.css is not in the build." >> "$RUNNER_TEMP/failure.md"
+            echo "::error::Brand marker missing from the built CSS"
+            exit 1
+          fi
+          docker rm -f smoke >/dev/null
+          echo "Smoke test passed: $TAG"
+
+      - name: Log in to GHCR
+        if: env.SKIP != 'true'
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push image
+        if: env.SKIP != 'true'
+        run: |
+          docker push "$IMAGE"
+          digest=$(docker buildx imagetools inspect "$IMAGE" | awk '$1 == "Digest:" && !d { d = $2 } END { print d }')
+          if [ -z "$digest" ]; then
+            echo "::error::Could not read the digest of $IMAGE"
+            exit 1
+          fi
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+          echo "Pushed $IMAGE@$digest"
+
+      - name: Create push token
+        id: app-token
+        if: env.SKIP != 'true' && env.HAS_SYNC_APP == 'true'
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SYNC_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
+      - name: Push ${{ env.BRAND_BRANCH }} and the source tag
+        if: env.SKIP != 'true'
+        env:
+          PUSH_TOKEN: ${{ steps.app-token.outputs.token || secrets.SYNC_TOKEN }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          origin="https://github.com/$GITHUB_REPOSITORY.git"
+
+          if [ "$REBASE" = true ]; then
+            git push --force-with-lease="refs/heads/$BRAND_BRANCH:$OLD_HEAD" "$origin" "HEAD:refs/heads/$BRAND_BRANCH"
+            # Workflow files added by this upstream release show up in the API a few
+            # seconds after the push; disable them before the tag push can start them.
+            want=$(git ls-tree --name-only HEAD .github/workflows/ | sort)
+            for _ in $(seq 1 12); do
+              have=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows" --jq '.workflows[].path' | sort)
+              [ -z "$(comm -23 <(echo "$want") <(echo "$have"))" ] && break
+              sleep 5
+            done
+            bash "$RUNNER_TEMP/disable-inherited.sh"
+          fi
+
+          git tag -a "$TAG" -m "$TAG" -m "Image: $IMAGE@$DIGEST" -m "Upstream: $UPSTREAM_REPO $UP_TAG"
+          git push "$origin" "refs/tags/$TAG"
+
+      - name: Open the deploy issue
+        if: env.SKIP != 'true'
+        run: |
+          body="$RUNNER_TEMP/issue.md"
+          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          {
+            echo "This image passed the smoke test and is ready to deploy. Back up the database first: upgrades are one-way."
+            echo
+            echo "For \`deploy/.env\`:"
+            echo
+            echo '```'
+            echo "NEW_API_IMAGE=${IMAGE%:*}"
+            echo "NEW_API_VERSION=$TAG@$DIGEST"
+            echo '```'
+            echo
+            echo "- Source: $repo_url/tree/$TAG"
+            if [ "$REBASE" = true ]; then
+              echo "- Upstream: \`$BASE\` → \`$UP_TAG\`, changes: $GITHUB_SERVER_URL/$UPSTREAM_REPO/compare/$BASE...$UP_TAG"
+            else
+              echo "- Upstream: \`$UP_TAG\`, unchanged; this build carries new brand commits"
+            fi
+            echo "- Brand commits:"
+            git log --format='  - %h %s' "$UP_TAG..HEAD"
+            echo "- Run: $repo_url/actions/runs/$GITHUB_RUN_ID"
+            if [ -s "$RUNNER_TEMP/release-notes.md" ]; then
+              # In a code block, so @mentions and links in upstream's notes do not
+              # notify people or add references to upstream issues.
+              echo
+              echo "<details><summary>Upstream release notes</summary>"
+              echo
+              echo '`````text'
+              head -c 60000 "$RUNNER_TEMP/release-notes.md"
+              echo
+              echo '`````'
+              echo
+              echo "</details>"
+            fi
+          } > "$body"
+          title="Deploy ready: $TAG"
+          if [ "${SECURITY:-}" = true ]; then title="[SECURITY] $title"; fi
+          url=$(gh issue create --title "$title" --body-file "$body" --assignee "$GITHUB_REPOSITORY_OWNER")
+          echo "Opened $url"
+          echo "Published \`$IMAGE@$DIGEST\`: $url" >> "$GITHUB_STEP_SUMMARY"
+
+          # A successful run settles a failure reported on the same release.
+          gh issue list --state open --limit 100 --json number,title |
+            jq -r --arg t "Brand sync failed: $UP_TAG" '.[] | select(.title | endswith($t)) | .number' |
+            while read -r n; do
+              gh issue close "$n" --comment "Published \`$TAG\` in #${url##*/}."
+            done
+
+      - name: Report the failure
+        if: failure()
+        run: |
+          up_tag="${UP_TAG:-}"
+          title="Brand sync failed${up_tag:+: $up_tag}"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          existing=$(gh issue list --state open --limit 100 --json number,title |
+            jq -r --arg t "$title" 'map(select(.title | endswith($t))) | first | .number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Failed again: $run_url"
+            exit 0
+          fi
+          body="$RUNNER_TEMP/failure-issue.md"
+          {
+            echo "The brand sync failed. Nothing was announced, and running deployments are not affected."
+            echo
+            echo "- Run log: $run_url"
+            if [ -n "$up_tag" ]; then echo "- Upstream release: \`$up_tag\`"; fi
+            if [ -n "${BASE:-}" ]; then echo "- Base of \`$BRAND_BRANCH\`: \`$BASE\`"; fi
+            if [ -s "$RUNNER_TEMP/failure.md" ]; then
+              echo
+              cat "$RUNNER_TEMP/failure.md"
+            fi
+            echo
+            echo "While this issue is open, the hourly run skips this release. After fixing the cause, run the workflow by hand (Actions → Brand sync → Run workflow); a successful run closes this issue."
+          } > "$body"
+          if [ "${SECURITY:-}" = true ]; then title="[SECURITY] $title"; fi
+          gh issue create --title "$title" --body-file "$body" --assignee "$GITHUB_REPOSITORY_OWNER"
