@@ -6,7 +6,7 @@ As required by AGPLv3 section 7(c), the changes made in this fork are listed bel
 
 | File | Change | Since |
 |---|---|---|
-| `web/src/styles/brand.css` | New file: untoken colors for the default theme preset (light and dark), the untoken typefaces for the Auto font choice and for monospace text, and the layout and type of the public pages' header (styles only) | `v1.0.0-rc.51-brand.1`; colors changed, typefaces and header styles added in `v1.0.0-rc.51-brand.2` |
+| `web/src/styles/brand.css` | New file: untoken colors and corner radius for the default theme preset (light and dark), the untoken typefaces for the Auto font choice and for monospace text, the layout and type of the public pages' header, and the look of the logo, the sign-in pages, Model Square and About (styles only) | `v1.0.0-rc.51-brand.1`; colors changed, radius, typefaces and page styles added in `v1.0.0-rc.51-brand.2` |
 | `web/src/styles/brand-fonts/` | New files: the Geist and Geist Mono fonts by Vercel, unmodified, with their license (`OFL.txt`, SIL Open Font License 1.1) | `v1.0.0-rc.51-brand.2` |
 | `web/src/styles/index.css` | One line that imports `brand.css` after the theme presets | `v1.0.0-rc.51-brand.1` |
 | `web/public/brand/untoken-mark.svg` | New file: the untoken logo, which the site settings can point to | `v1.0.0-rc.51-brand.2` |
