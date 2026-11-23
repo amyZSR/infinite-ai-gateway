@@ -5,8 +5,11 @@
  * the untoken site. Light mode puts white cards on an off-white page and uses
  * ink-black primary actions with a lime tint for hover and selection; dark mode
  * is near-black with lime primary actions and ink text. The base radius is the
- * site's 10px. Only the default preset changes: `:root` holds the light values
- * and `.dark` the dark ones, and the other built-in presets set their own. Every
+ * site's 10px. Only the default preset changes: `:root:not(.dark)` holds the
+ * light values and `.dark` the dark ones, and the other built-in presets set
+ * their own. The light block skips dark mode because a plain `:root` rule here,
+ * later than theme.css and equally specific, would also override upstream's dark
+ * value of every variable that the `.dark` block below does not repeat. Every
  * variable overridden here must also exist in theme.css; the brand-sync
  * workflow checks this so an upstream rename cannot silently drop the brand
  * colors. `--brand-id` is the marker the smoke test looks for in the built CSS.
@@ -44,6 +47,9 @@
     'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas,
     'Liberation Mono', 'Courier New', monospace;
   --radius: 0.625rem;
+}
+
+:root:not(.dark) {
   --background: oklch(0.985 0.0013 106.4);
   --primary: oklch(0.15 0.002 286);
   --primary-foreground: oklch(1 0 0);
@@ -73,6 +79,7 @@
   --secondary-foreground: oklch(0.92 0 0);
   --ring: oklch(0.899 0.203 122.9);
   --chart-1: oklch(0.899 0.203 122.9);
+  --overview-accent-1: oklch(0.899 0.203 122.9);
   --sidebar-primary: oklch(0.899 0.203 122.9);
   --sidebar-primary-foreground: oklch(0.15 0.002 286);
   --sidebar-accent-foreground: oklch(0.93 0.12 122);
@@ -97,8 +104,10 @@ img[src$='/brand/untoken-mark.svg'] {
   outline-offset: -1px;
 }
 
-/* Sign-in and sign-up: the site name in the monospace face, as in the header. */
-a[href='/'].absolute > h1.font-medium {
+/* The site name in the monospace face, as in the header: on the sign-in and
+ * sign-up pages, and in the console's top bar. */
+a[href='/'].absolute > h1.font-medium,
+a.inline-flex.h-7 > span.max-w-\[12rem\].truncate {
   font-family: var(--font-mono);
   letter-spacing: -0.03em;
 }
