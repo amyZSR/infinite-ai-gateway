@@ -112,6 +112,12 @@ a.inline-flex.h-7 > span.max-w-\[12rem\].truncate {
   letter-spacing: -0.03em;
 }
 
+/* The version next to the site name in the console's top bar: upstream's 8rem
+ * cuts a brand tag such as v1.0.0-rc.51-brand.3 short. */
+button > span.max-w-32.truncate.font-mono {
+  max-width: 10rem;
+}
+
 /* Model Square (and Rankings): the dot grid of the untoken site instead of
  * upstream's blue glow, and the site's heading weight. The glow's colors are an
  * inline style, hence !important. */
@@ -180,8 +186,12 @@ header.fixed.inset-x-0.top-0 nav a[href='/sign-in'] {
 }
 
 @media (min-width: 64rem) {
+  /* Upstream makes the name area a size container of 9rem, which its content
+   * cannot widen. The monospace name needs 10rem next to the version button
+   * that admins see. */
   header.fixed.inset-x-0.top-0 nav > div:first-child {
     flex: 0 0 auto;
+    min-width: 10rem;
   }
 
   header.fixed.inset-x-0.top-0 nav > div.hidden {
