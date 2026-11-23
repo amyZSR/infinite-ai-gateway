@@ -246,10 +246,11 @@ jobs:
 
           # Every variable brand.css sets must still exist in the upstream theme;
           # after an upstream rename the brand color would silently stop applying.
+          # Skipped: the brand marker, and Tailwind's own monospace font variable.
           missing=""
           vars=$(grep -oE -- '--[A-Za-z0-9-]+[[:space:]]*:' web/src/styles/brand.css | sed -E 's/[[:space:]]*:$//' | sort -u)
           for v in $vars; do
-            [ "$v" != --brand-id ] || continue
+            case "$v" in --brand-id|--font-mono) continue ;; esac
             grep -qE -- "(^|[^A-Za-z0-9-])$v[[:space:]]*:" web/src/styles/theme.css || missing="$missing $v"
           done
           grep -qF "@import './brand.css';" web/src/styles/index.css || missing="$missing @import './brand.css'"
