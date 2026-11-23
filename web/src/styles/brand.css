@@ -1,14 +1,15 @@
 /*
  * Brand layer for untoken, a modified new-api (see MODIFICATIONS.md).
  *
- * untoken colors for the default theme preset. Light mode uses ink-black
- * primary actions with a lime tint for hover and selection; dark mode uses lime
- * primary actions with ink text. Only the default preset changes: `:root` holds
- * the light values and `.dark` the dark ones, so the other built-in presets stay
- * as upstream ships them. Every variable overridden here must also exist in
- * theme.css; the brand-sync workflow checks this so an upstream rename cannot
- * silently drop the brand colors. `--brand-id` is the marker the smoke test
- * looks for in the built CSS.
+ * untoken colors and corner radius for the default theme preset, taken from
+ * the untoken site. Light mode puts white cards on an off-white page and uses
+ * ink-black primary actions with a lime tint for hover and selection; dark mode
+ * is near-black with lime primary actions and ink text. The base radius is the
+ * site's 10px. Only the default preset changes: `:root` holds the light values
+ * and `.dark` the dark ones, and the other built-in presets set their own. Every
+ * variable overridden here must also exist in theme.css; the brand-sync
+ * workflow checks this so an upstream rename cannot silently drop the brand
+ * colors. `--brand-id` is the marker the smoke test looks for in the built CSS.
  *
  * The untoken typefaces are Geist and Geist Mono (Vercel, SIL Open Font
  * License 1.1, see brand-fonts/OFL.txt). Geist replaces the browser font of the
@@ -42,6 +43,8 @@
   --font-mono:
     'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas,
     'Liberation Mono', 'Courier New', monospace;
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.0013 106.4);
   --primary: oklch(0.15 0.002 286);
   --primary-foreground: oklch(1 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -57,6 +60,14 @@
 }
 
 .dark {
+  --background: oklch(0.15 0.002 286);
+  --card: oklch(0.192 0.004 286);
+  --popover: oklch(0.228 0.006 286);
+  --secondary: oklch(0.257 0.006 286);
+  --muted: oklch(0.228 0.006 286);
+  --sidebar: oklch(0.14 0.002 286);
+  --skeleton-base: oklch(0.245 0.005 286);
+  --skeleton-highlight: oklch(0.34 0.005 286);
   --primary: oklch(0.899 0.203 122.9);
   --primary-foreground: oklch(0.15 0.002 286);
   --secondary-foreground: oklch(0.92 0 0);
@@ -66,6 +77,74 @@
   --sidebar-primary-foreground: oklch(0.15 0.002 286);
   --sidebar-accent-foreground: oklch(0.93 0.12 122);
   --sidebar-ring: oklch(0.899 0.203 122.9);
+}
+
+/*
+ * Details of single pages and elements. Like the header rules below, they match
+ * the markup's own classes and attributes, so a release that changes that markup
+ * brings back upstream's look there and nothing else.
+ */
+
+/* The logo keeps the square shape of the untoken mark instead of the circle or
+ * rounded box the layouts cut it to. On dark pages a thin outline marks the
+ * edge that the near-black square would otherwise lose. */
+img[src$='/brand/untoken-mark.svg'] {
+  border-radius: 22%;
+}
+
+.dark img[src$='/brand/untoken-mark.svg'] {
+  outline: 1px solid #2a2a2f;
+  outline-offset: -1px;
+}
+
+/* Sign-in and sign-up: the site name in the monospace face, as in the header. */
+a[href='/'].absolute > h1.font-medium {
+  font-family: var(--font-mono);
+  letter-spacing: -0.03em;
+}
+
+/* Model Square (and Rankings): the dot grid of the untoken site instead of
+ * upstream's blue glow, and the site's heading weight. The glow's colors are an
+ * inline style, hence !important. */
+div[aria-hidden].pointer-events-none.absolute.inset-x-0.top-0.h-\[600px\] {
+  background: radial-gradient(#d6d6d0 1px, transparent 1px) 0 0 / 22px 22px !important;
+  opacity: 1;
+}
+
+.dark div[aria-hidden].pointer-events-none.absolute.inset-x-0.top-0.h-\[600px\] {
+  background-image: radial-gradient(#232326 1px, transparent 1px) !important;
+}
+
+h1.leading-\[1\.15\].font-bold.tracking-tight {
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+/* About (and a Markdown home page): a readable column with a page title,
+ * instead of small text across the full width. */
+main > div.mx-auto.max-w-6xl.px-4.py-8 {
+  max-width: 48rem;
+  padding-top: 3rem;
+  padding-bottom: 4rem;
+}
+
+main > div.mx-auto.max-w-6xl.px-4.py-8 > .prose {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+main > div.mx-auto.max-w-6xl.px-4.py-8 > .prose > :is(h1, h2):first-child {
+  margin: 0 0 1.5rem;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+main > div.mx-auto.max-w-6xl.px-4.py-8 > .prose h3 {
+  margin-top: 2.5rem;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
 }
 
 /*
